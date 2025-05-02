@@ -3,7 +3,7 @@
 ## What it is
 It is a protocol between a client and a server to help with:
 - service discovery
-- servuice execution
+- service execution
 
 where service includes:
 * tools,
