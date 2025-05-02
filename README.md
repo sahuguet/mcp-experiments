@@ -296,6 +296,7 @@ Here is my personal Claude Desktop config, that defines 2 local MCP server.
    - you can trivially enrich your LLM-based application with new capabilities.
 1. when building servers
    - you have a straightforward way of packaging your service as an MCP server.
+   - MCP inspector is useful tool
    - all MCP clients (e.g. Cursor, Claude Desktop, etc.) can call you (either locally or remotely).
 
 
