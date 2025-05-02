@@ -3,7 +3,7 @@
 ## What it is
 It is a protocol between a client and a server to help with:
 - service discovery
-- servuce execution
+- servuice execution
 
 where service includes:
 * tools,
@@ -150,7 +150,7 @@ async def get_random_number(min_value: int, max_value: int) -> int:
 
 Becasue MCP gives you 2 useful features for free
 - a standardized service discovery
-- schena generation in a format that is understood by LLMs, i.e. JsonSchema (see `python mcp_client.py` example above).
+- schema generation in a format that is understood by LLMs, i.e. JsonSchema (see `python mcp_client.py` example above).
 
 This is not necessarily hard to do (e.g. using FastAPI or similar library); but MCP offers standardized way of doing it.
 
@@ -292,8 +292,8 @@ Here is my personal Claude Desktop config, that defines 2 local MCP server.
 1. it makes things marginally eaisier when you build both client and servers.
 1. when building clients
    - you simply "mount" MCP servers, do the discovery and you are in business
-   - each server behaves the same
-   - each capability inside a given server behaves the same
+   - each server behaves the same; each capability inside a given server behaves the same
+   - you can trivially enrich your LLM-based application with new capabilities.
 1. when building servers
    - you have a straightforward way of packaging your service as an MCP server.
    - all MCP clients (e.g. Cursor, Claude Desktop, etc.) can call you (either locally or remotely).
