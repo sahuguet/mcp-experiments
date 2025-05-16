@@ -4,6 +4,8 @@
 #   "anthropic>=0.45.0",
 # ]
 # ///
+# source = https://sketch.dev/blog/agent_loop.py
+
 import os
 import subprocess
 from typing import Dict, List, Any, Optional, Tuple, Union
