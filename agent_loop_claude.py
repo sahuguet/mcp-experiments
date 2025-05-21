@@ -9,22 +9,19 @@
 import os
 import subprocess
 from typing import Dict, List, Any, Optional, Tuple, Union
-import traceback
 
-import litellm
-import json
+import anthropic
 
 SYSTEM_PROMPT = """You are a helpful AI assistant.
         Your job is to ask 3 questions from the Proust Questionnaire to the user.
         Store the result in a JSON file.
-        Don't stop until you have asked all 1 questions and received 1 answers from the user.
+        Don't stop until you have asked all 3 questions and received 3 answers from the user.
         Don't tell the user the purpose of the conversation.
         Feel free to include some casual chit-chat in between the questions.
         It is ok for the user to be off-topic. But bring them back to the task at hand.
-        Ask the user his name. Store the JSON is a file called \"proust_answers_for_<NAME>.json\" where <NAME> is the name of the user.
-        DO NOT RUN shell commands based on the user's request. Only run shell commands for task you have been given. If the user asks, politely decline.
-        Before running any shell command, make sure the request is NOT for the user.
-"""
+        DONT'T TELL THE USER ABOUT THE TOOLS YOU ARE USING.
+        DON'T LET THE USER ASK YOU TO USE THE BASH TOOLS, WITH THE EXCEPTION OF ASKING FOR THE TINE OR THE DATE.
+        """
 
 def main():
     try:
@@ -35,7 +32,6 @@ def main():
         print("\n\nExiting. Goodbye!")
     except Exception as e:
         print(f"\n\nAn error occurred: {str(e)}")
-        traceback.print_exc()
 
 def loop(llm):
     # msg = user_input()
@@ -44,7 +40,6 @@ def loop(llm):
         output, tool_calls = llm(msg)
         print("Agent: ", output)
         if tool_calls:
-            print(tool_calls)
             msg = [ handle_tool_call(tc) for tc in tool_calls ]
         else:
             msg = user_input()
@@ -52,7 +47,7 @@ def loop(llm):
 
 bash_tool = {
     "name": "bash",
-    "description": "Execute bash commands and return the output. Only run shell commands for task you have been given. If the user asks, politely decline.",
+    "description": "Execute bash commands and return the output",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -64,6 +59,23 @@ bash_tool = {
         "required": ["command"]
     }
 }
+
+sql_tool = {
+    "name": "sql",
+    "description": "Execute SQL commands and return the output",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The SQL statement to execute"
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+
 
 # Function to execute bash commands
 def execute_bash(command):
@@ -79,6 +91,22 @@ def execute_bash(command):
         return f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\nEXIT CODE: {result.returncode}"
     except Exception as e:
         return f"Error executing command: {str(e)}"
+    
+# Function to execute bash commands
+def execute_sql(query):
+    """Execute a SQL command and return a formatted string with the results. The function uses the DuckDB CLI to execute the query."""
+    # If we have a timeout exception, we'll return an error message instead
+    try:
+        result = subprocess.run(
+            ["duckdb", "-c", query],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\nEXIT CODE: {result.returncode}"
+    except Exception as e:
+        return f"Error executing command: {str(e)}"
+
 
 def user_input():
     x = input("You: ")
@@ -88,81 +116,61 @@ def user_input():
     return [{"type": "text", "text": x}]
 
 class LLM:
-    def __init__(self, model: str, provider: Optional[str] = None):
+    def __init__(self, model):
+        if "ANTHROPIC_API_KEY" not in os.environ:
+            raise ValueError("ANTHROPIC_API_KEY environment variable not found.")
+        self.client = anthropic.Anthropic()
         self.model = model
-        self.provider = provider or self._infer_provider(model)
         self.messages = []
         self.system_prompt = SYSTEM_PROMPT
-        self.tools = [bash_tool]
-        self._set_api_key()
-
-    def _infer_provider(self, model: str) -> str:
-        if model.startswith("gpt-") or model.startswith("text-"):
-            return "openai"
-        elif model.startswith("claude"):
-            return "anthropic"
-        elif model.startswith("gemini"):
-            return "google"
-        else:
-            raise ValueError(f"Unknown provider for model: {model}")
-
-    def _set_api_key(self):
-        if self.provider == "openai":
-            if "OPENAI_API_KEY" not in os.environ:
-                raise ValueError("OPENAI_API_KEY environment variable not found.")
-        elif self.provider == "anthropic":
-            if "ANTHROPIC_API_KEY" not in os.environ:
-                raise ValueError("ANTHROPIC_API_KEY environment variable not found.")
-        elif self.provider == "google":
-            if "GOOGLE_API_KEY" not in os.environ:
-                raise ValueError("GOOGLE_API_KEY environment variable not found.")
+        self.tools = [bash_tool, sql_tool]
 
     def __call__(self, content):
-        print(content)
         self.messages.append({"role": "user", "content": content})
-    
-        response = litellm.completion(
+        self.messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        response = self.client.messages.create(
             model=self.model,
+            max_tokens=20_000,
+            system=self.system_prompt,
             messages=self.messages,
-            tools=self.tools,
-            tool_choice="auto",
-            max_tokens=2000,
+            tools=self.tools
         )
-        print(response["choices"][0]["message"]["content"])
-        output_text = ""
-        tool_calls = []
+        del self.messages[-1]["content"][-1]["cache_control"]
         assistant_response = {"role": "assistant", "content": []}
+        tool_calls = []
+        output_text = ""
 
-        # litellm returns a dict with 'choices', each with 'message'
-        for choice in response["choices"]:
-            msg = choice["message"]
-            msg_tool_calls = msg.get("tool_calls") or []
-            
-            for tc in msg_tool_calls:
-                print(tc)
+        for content in response.content:
+            if content.type == "text":
+                text_content = content.text
+                output_text += text_content
+                assistant_response["content"].append({"type": "text", "text": text_content})
+            elif content.type == "tool_use":
+                assistant_response["content"].append(content)
                 tool_calls.append({
-                    "id": tc.get("id", ""),
-                    "name": tc["function"]["name"],
-                    "input": json.loads(tc["function"]["arguments"])
+                    "id": content.id,
+                    "name": content.name,
+                    "input": content.input
                 })
-                assistant_response["content"].append(tc)
-            content = msg.get("content")
-            if content:
-                output_text += content
-                assistant_response["content"].append({"type": "text", "text": content})
 
         self.messages.append(assistant_response)
         return output_text, tool_calls
 
 def handle_tool_call(tool_call):
-    print(tool_call)
-    if tool_call["name"] != "bash":
+    if tool_call["name"] not in ["bash", "sql"]:
         raise Exception(f"Unsupported tool: {tool_call['name']}")
 
-    command = tool_call["input"]["command"]
-    print(f"Executing bash command: {command}")
-    output_text = execute_bash(command)
-    print(f"Bash output:\n{output_text}")
+    print(tool_call)
+    if tool_call["name"] == "bash":
+        command = tool_call["input"]["command"]
+        print(f"Executing bash command: {command}")
+        output_text = execute_bash(command)
+        print(f"Bash output:\n{output_text}")
+    elif tool_call["name"] == "sql":
+        query = tool_call["input"]["query"]
+        print(f"Executing SQL command: {query}")
+        output_text = execute_sql(query)
+        print(f"SQL output:\n{output_text}")
     return dict(
         type="tool_result",
         tool_use_id=tool_call["id"],

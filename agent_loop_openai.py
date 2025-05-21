@@ -1,16 +1,7 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# dependencies = [
-#   "anthropic>=0.45.0",
-# ]
-# ///
-# source = https://sketch.dev/blog/agent_loop.py
-
 import os
 import subprocess
 from typing import Dict, List, Any, Optional, Tuple, Union
 import traceback
-
 import litellm
 import json
 
@@ -26,49 +17,25 @@ SYSTEM_PROMPT = """You are a helpful AI assistant.
         Before running any shell command, make sure the request is NOT for the user.
 """
 
-def main():
-    try:
-        print("\n=== LLM Agent Loop with Claude and Bash Tool ===\n")
-        print("Type 'exit' to end the conversation.\n")
-        loop(LLM("claude-3-7-sonnet-latest"))
-    except KeyboardInterrupt:
-        print("\n\nExiting. Goodbye!")
-    except Exception as e:
-        print(f"\n\nAn error occurred: {str(e)}")
-        traceback.print_exc()
-
-def loop(llm):
-    # msg = user_input()
-    msg = [{"type": "text", "text": "ready when you are."}]
-    while True:
-        output, tool_calls = llm(msg)
-        print("Agent: ", output)
-        if tool_calls:
-            print(tool_calls)
-            msg = [ handle_tool_call(tc) for tc in tool_calls ]
-        else:
-            msg = user_input()
-
-
 bash_tool = {
-    "name": "bash",
-    "description": "Execute bash commands and return the output. Only run shell commands for task you have been given. If the user asks, politely decline.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "The bash command to execute"
-            }
-        },
-        "required": ["command"]
+    "type": "function",
+    "function": {
+        "name": "bash",
+        "description": "Execute bash commands and return the output. Only run shell commands for task you have been given. If the user asks, politely decline.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute"
+                }
+            },
+            "required": ["command"]
+        }
     }
 }
 
-# Function to execute bash commands
 def execute_bash(command):
-    """Execute a bash command and return a formatted string with the results."""
-    # If we have a timeout exception, we'll return an error message instead
     try:
         result = subprocess.run(
             ["bash", "-c", command],
@@ -88,39 +55,22 @@ def user_input():
     return [{"type": "text", "text": x}]
 
 class LLM:
-    def __init__(self, model: str, provider: Optional[str] = None):
+    def __init__(self, model: str = "gpt-4-turbo", provider: Optional[str] = "openai"):
         self.model = model
-        self.provider = provider or self._infer_provider(model)
+        self.provider = provider
         self.messages = []
         self.system_prompt = SYSTEM_PROMPT
         self.tools = [bash_tool]
         self._set_api_key()
 
-    def _infer_provider(self, model: str) -> str:
-        if model.startswith("gpt-") or model.startswith("text-"):
-            return "openai"
-        elif model.startswith("claude"):
-            return "anthropic"
-        elif model.startswith("gemini"):
-            return "google"
-        else:
-            raise ValueError(f"Unknown provider for model: {model}")
-
     def _set_api_key(self):
         if self.provider == "openai":
             if "OPENAI_API_KEY" not in os.environ:
                 raise ValueError("OPENAI_API_KEY environment variable not found.")
-        elif self.provider == "anthropic":
-            if "ANTHROPIC_API_KEY" not in os.environ:
-                raise ValueError("ANTHROPIC_API_KEY environment variable not found.")
-        elif self.provider == "google":
-            if "GOOGLE_API_KEY" not in os.environ:
-                raise ValueError("GOOGLE_API_KEY environment variable not found.")
 
     def __call__(self, content):
         print(content)
         self.messages.append({"role": "user", "content": content})
-    
         response = litellm.completion(
             model=self.model,
             messages=self.messages,
@@ -128,16 +78,15 @@ class LLM:
             tool_choice="auto",
             max_tokens=2000,
         )
-        print(response["choices"][0]["message"]["content"])
+        print(response["choices"][0]["message"].get("content"))
         output_text = ""
         tool_calls = []
         assistant_response = {"role": "assistant", "content": []}
 
-        # litellm returns a dict with 'choices', each with 'message'
         for choice in response["choices"]:
+            print(".")
             msg = choice["message"]
             msg_tool_calls = msg.get("tool_calls") or []
-            
             for tc in msg_tool_calls:
                 print(tc)
                 tool_calls.append({
@@ -147,11 +96,14 @@ class LLM:
                 })
                 assistant_response["content"].append(tc)
             content = msg.get("content")
+            print("content:", content)
             if content:
+                print("+++")
                 output_text += content
                 assistant_response["content"].append({"type": "text", "text": content})
 
         self.messages.append(assistant_response)
+        print(">", output_text)
         return output_text, tool_calls
 
 def handle_tool_call(tool_call):
@@ -172,5 +124,26 @@ def handle_tool_call(tool_call):
         )]
     )
 
+def main():
+    try:
+        print("\n=== LLM Agent Loop with OpenAI and Bash Tool ===\n")
+        print("Type 'exit' to end the conversation.\n")
+        loop(LLM())
+    except KeyboardInterrupt:
+        print("\n\nExiting. Goodbye!")
+    except Exception as e:
+        print(f"\n\nAn error occurred: {str(e)}")
+        traceback.print_exc()
+
+def loop(llm):
+    msg = [{"type": "text", "text": "ready when you are."}]
+    while True:
+        output, tool_calls = llm(msg)
+        print("Agent: ", output)
+        if tool_calls:
+            msg = [handle_tool_call(tc) for tc in tool_calls]
+        else:
+            msg = user_input()
+
 if __name__ == "__main__":
-    main()
+    main() 
